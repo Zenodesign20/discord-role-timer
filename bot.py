@@ -14,7 +14,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 ADMIN_ID = 1392851942480412822
 
 IMAGE_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
-FOOTER_ICON = "https://cdn.discordapp.com/attachments/1468621028598087843/1471249375706746890/Black_White_Minimalist_Animation_Logo_Video_1.gif?ex=698e3f41&is=698cedc1&hm=01225246d18d44f7fbca37490f50a106e24ba7f9759d5faac411212d20c097c6&"   # 🔁 เปลี่ยนโลโก้มุมขวาล่าง
+FOOTER_ICON = "https://image2url.com/r2/default/images/1770846113306-1567796c-d85c-49f4-bff4-b08070f8c673.gif"   # 🔁 เปลี่ยนโลโก้มุมขวาล่าง
 DATA_FILE = "roles.json"
 
 UPDATE_INTERVAL = 10
