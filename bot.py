@@ -5,124 +5,93 @@ import json
 import os
 from datetime import datetime, timedelta
 
-# ================= CONFIG =================
+# ========= CONFIG =========
 TOKEN = os.getenv("DISCORD_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 DATA_FILE = "members.json"
-
+ROLES_FILE = "roles.json"
 DURATION_DAYS = 30
 
 GIF_LOGO = "https://cdn.discordapp.com/attachments/1468621028598087843/1471249375706746890/Black_White_Minimalist_Animation_Logo_Video_1.gif"
 
-# ตัวอย่างราคา (โชว์อย่างเดียว ไม่เอาไปคำนวณ)
-ROLE_PACKAGES = {
-    "VIP": {"price": "200 บาท", "days": 30},
-    "Gold": {"price": "100 บาท", "days": 30}
-}
-
+# ========= INTENTS =========
 intents = discord.Intents.default()
 intents.members = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= UTILS =================
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({}, f, indent=2)
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
+# ========= UTILS =========
+def load_json(path, default):
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(default, f, ensure_ascii=False, indent=2)
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def format_remaining(td: timedelta):
-    total_seconds = int(td.total_seconds())
-    if total_seconds < 0:
-        return "หมดอายุแล้ว"
-
-    days = total_seconds // 86400
-    hours = (total_seconds % 86400) // 3600
-    minutes = (total_seconds % 3600) // 60
-    seconds = total_seconds % 60
-
-    return f"{days} วัน / {hours} ชม / {minutes} นาที / {seconds} วิ"
-
-# ================= EVENTS =================
+# ========= EVENTS =========
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     role_timer.start()
     print("👑 BOT ONLINE")
 
-# ================= COMMAND =================
-@bot.tree.command(name="setrole", description="เพิ่มสมาชิก (สมัคร + 30 วัน)")
+# ========= /setrole =========
+@bot.tree.command(name="setrole", description="เพิ่มสมาชิก (กำหนดวันที่สมัครเอง / 30 วัน)")
 @app_commands.describe(
     member="สมาชิก",
     role="Role",
     register_date="วันที่สมัคร (DD/MM/YY)"
 )
-async def setrole(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    role: discord.Role,
-    register_date: str
-):
+async def setrole(interaction: discord.Interaction, member: discord.Member, role: discord.Role, register_date: str):
     if interaction.user.id != ADMIN_ID:
-        await interaction.response.send_message("❌ สำหรับแอดมินเท่านั้น", ephemeral=True)
+        await interaction.response.send_message("❌ คำสั่งนี้สำหรับแอดมินเท่านั้น", ephemeral=True)
         return
 
     try:
-        start_date = datetime.strptime(register_date, "%d/%m/%y")
-        start_date = start_date.replace(hour=0, minute=0, second=0)
+        start = datetime.strptime(register_date, "%d/%m/%y")
+        start = start.replace(hour=0, minute=0, second=0)
 
-        # นับวันสมัครเป็นวันที่ 1 → +29 = 30 วัน
-        expire_date = start_date + timedelta(days=DURATION_DAYS - 1)
-        expire_date = expire_date.replace(hour=23, minute=59, second=59)
+        # นับวันสมัครเป็นวันแรก → +29 = ครบ 30 วัน
+        expire = start + timedelta(days=DURATION_DAYS - 1)
+        expire = expire.replace(hour=23, minute=59, second=59)
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบวันที่ต้องเป็น DD/MM/YY", ephemeral=True)
         return
 
-    data = load_data()
-
-    role_name_clean = role.name.split("|")[0].strip()
-    package = ROLE_PACKAGES.get(role_name_clean, {"price": "-", "days": 30})
+    data = load_json(DATA_FILE, {})
 
     data[str(member.id)] = {
-        "member_name": member.display_name,
         "role_id": role.id,
-        "role_name": role.name,
-        "register_date": start_date.isoformat(),
-        "expire_date": expire_date.isoformat(),
-        "package_name": role_name_clean,
-        "price": package["price"],
-        "days": package["days"],
+        "register_date": start.isoformat(),
+        "expire_date": expire.isoformat(),
         "warned_3days": False
     }
 
-    save_data(data)
+    save_json(DATA_FILE, data)
     await member.add_roles(role)
 
     try:
         await member.send(
-            f"👑 สมัครสมาชิกสำเร็จ\n"
-            f"📅 สมัครวันที่: {start_date.strftime('%d/%m/%Y')}\n"
-            f"⏳ หมดอายุวันที่: {expire_date.strftime('%d/%m/%Y')}"
+            f"👑 สมัครสมาชิกเรียบร้อย\n"
+            f"📅 วันที่สมัคร: {start.strftime('%d/%m/%Y')}\n"
+            f"🗓 วันหมดอายุ: {expire.strftime('%d/%m/%Y')}"
         )
     except:
         pass
 
-    await interaction.response.send_message(
-        f"✅ เพิ่มสมาชิก {member.mention} เรียบร้อย",
-        ephemeral=True
-    )
+    await interaction.response.send_message(f"✅ เพิ่มสมาชิก {member.mention} เรียบร้อย", ephemeral=True)
 
-# ================= CHECK =================
-@bot.tree.command(name="check", description="ตรวจสอบสถานะสมาชิก")
+# ========= /check =========
+@bot.tree.command(name="check", description="ตรวจสอบเวลาสมาชิก")
 async def check(interaction: discord.Interaction):
-    data = load_data()
+    data = load_json(DATA_FILE, {})
+    roles_cfg = load_json(ROLES_FILE, {})
     uid = str(interaction.user.id)
 
     if uid not in data:
@@ -135,41 +104,56 @@ async def check(interaction: discord.Interaction):
     start = datetime.fromisoformat(info["register_date"])
     expire = datetime.fromisoformat(info["expire_date"])
 
-    used_days = max(0, (now.date() - start.date()).days + 1)
     remaining = expire - now
+    if remaining.total_seconds() < 0:
+        remaining = timedelta(seconds=0)
 
-    progress_percent = min(100, int((used_days / DURATION_DAYS) * 100))
-    bar = "🟩" * (progress_percent // 10) + "⬛" * (10 - progress_percent // 10)
+    days = remaining.days
+    hours, rem = divmod(remaining.seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
 
-    embed = discord.Embed(
-        title="👑 MEMBER STATUS",
-        color=discord.Color.gold()
-    )
+    used_days = (now - start).days
+    used_days = max(0, min(used_days, DURATION_DAYS))
+    progress = int((used_days / DURATION_DAYS) * 100)
+
+    bar_len = 20
+    filled = int(bar_len * progress / 100)
+    bar = "🟩" * filled + "⬛" * (bar_len - filled)
+
+    role = interaction.guild.get_role(info["role_id"])
+    role_name = role.name if role else "Unknown"
+
+    pack_name = role_name.split("|")[0].strip()
+    pack = roles_cfg.get(pack_name, {})
+    price = pack.get("price", "-")
+    pack_days = pack.get("days", DURATION_DAYS)
+
+    embed = discord.Embed(title="📆 Check Member Time", color=discord.Color.gold())
     embed.set_thumbnail(url=GIF_LOGO)
 
     embed.add_field(name="👤 สมาชิก", value=interaction.user.mention, inline=False)
-    embed.add_field(name="🎭 Role", value=info["role_name"], inline=False)
+    embed.add_field(name="🎭 Role", value=role.mention if role else role_name, inline=False)
     embed.add_field(name="📅 วันที่สมัคร", value=start.strftime("%d/%m/%Y"), inline=False)
-
     embed.add_field(
-        name="💳 แพ็กเกจ",
-        value=f"**{info['package_name']}** | ราคา {info['price']} | {info['days']} วัน",
+        name="💎 แพ็กเกจสมาชิก",
+        value=f"**{pack_name}** | ราคา **{price} บาท** | จำนวน **{pack_days} วัน**",
         inline=False
     )
-
-    embed.add_field(name="📆 วันหมดอายุ", value=expire.strftime("%d/%m/%Y"), inline=False)
-    embed.add_field(name="📈 ใช้ไปแล้ว", value=f"{used_days} วัน", inline=False)
-    embed.add_field(name="⏳ เวลาที่เหลือ", value=format_remaining(remaining), inline=False)
-    embed.add_field(name="📊 Progress", value=f"{bar} {progress_percent}%", inline=False)
-
-    embed.set_footer(text="👑 TIME MEMBER SYSTEM")
+    embed.add_field(name="🗓 วันหมดอายุ", value=expire.strftime("%d/%m/%Y"), inline=False)
+    embed.add_field(
+        name="⏳ เวลาที่เหลือ",
+        value=f"{days} วัน / {hours} ชม / {minutes} นาที / {seconds} วินาที",
+        inline=False
+    )
+    embed.add_field(name="📊 Progress", value=f"{bar} **{progress}%**", inline=False)
+    embed.set_footer(text="👑 ADMINZENO • TIME MEMBER SYSTEM")
 
     await interaction.response.send_message(embed=embed)
 
-# ================= TIMER =================
+# ========= TIMER =========
 @tasks.loop(minutes=1)
 async def role_timer():
-    data = load_data()
+    data = load_json(DATA_FILE, {})
     now = datetime.now()
     changed = False
 
@@ -184,10 +168,10 @@ async def role_timer():
         if not user:
             continue
 
-        # 🔔 แจ้งเตือนก่อนหมด 3 วัน
-        if not warned and 0 < (expire - now).days <= 3:
+        # 🔔 เตือนก่อนหมด 3 วัน
+        if not warned and (expire - now).days == 3:
             try:
-                await user.send("⏰ สมาชิกของคุณจะหมดอายุในอีก **3 วัน**")
+                await user.send("⏰ สมาชิกของคุณจะหมดอายุในอีก 3 วัน")
             except:
                 pass
             info["warned_3days"] = True
@@ -195,17 +179,17 @@ async def role_timer():
 
         # ❌ หมดอายุ
         if now >= expire:
-            for guild in bot.guilds:
-                member = guild.get_member(int(uid))
-                if member:
-                    role = guild.get_role(info["role_id"])
+            for g in bot.guilds:
+                m = g.get_member(int(uid))
+                if m:
+                    role = g.get_role(info["role_id"])
                     if role:
-                        await member.remove_roles(role)
+                        await m.remove_roles(role)
             del data[uid]
             changed = True
 
     if changed:
-        save_data(data)
+        save_json(DATA_FILE, data)
 
-# ================= START =================
+# ========= START =========
 bot.run(TOKEN)
