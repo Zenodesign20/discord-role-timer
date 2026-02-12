@@ -12,13 +12,18 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 DATA_FILE = "members.json"
 TOTAL_DAYS = 30
 
-# ================= BOT =================
+GIF_THUMBNAIL = "https://cdn.discordapp.com/attachments/1468621028598087843/1471249375706746890/Black_White_Minimalist_Animation_Logo_Video_1.gif"
+
+ROLE_PACKAGES = {
+    "VIP": {"price": 200, "days": 30},
+    "Gold": {"price": 100, "days": 30},
+}
+
 intents = discord.Intents.default()
 intents.members = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= Utils =================
+# ================= UTIL =================
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
@@ -29,194 +34,153 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def calc_expire(start_date: datetime.date):
-    return start_date + datetime.timedelta(days=TOTAL_DAYS - 1)
+def parse_date(d):
+    return datetime.datetime.strptime(d, "%d/%m/%y").date()
 
-def progress_bar(used):
-    percent = min(used / TOTAL_DAYS, 1)
-    filled = int(percent * 10)
-    return "🟩" * filled + "⬜" * (10 - filled)
+def expire_date(start):
+    return start + datetime.timedelta(days=29)
 
-def format_timedelta(td: datetime.timedelta):
-    seconds = int(td.total_seconds())
-    if seconds < 0:
-        seconds = 0
-    days, seconds = divmod(seconds, 86400)
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
-    return f"{days} วัน / {hours} ชม / {minutes} นาที / {seconds} วินาที"
+def format_remaining(td):
+    if td.total_seconds() < 0:
+        td = datetime.timedelta(seconds=0)
+    d, r = divmod(int(td.total_seconds()), 86400)
+    h, r = divmod(r, 3600)
+    m, s = divmod(r, 60)
+    return f"{d} วัน / {h} ชม / {m} นาที / {s} วินาที"
 
-# ================= Embed Builder =================
-def build_member_embed(user: discord.Member, info: dict):
-    start = datetime.date.fromisoformat(info["start"])
-    expire = datetime.date.fromisoformat(info["expire"])
-    now = datetime.datetime.now()
+def progress(start_dt, end_dt):
+    total = (end_dt - start_dt).total_seconds()
+    passed = (datetime.datetime.now() - start_dt).total_seconds()
+    ratio = min(max(passed / total, 0), 1)
+    bar = int(ratio * 10)
+    return "🟩" * bar + "⬜" * (10 - bar)
 
-    used = (now.date() - start).days + 1
-    remaining = datetime.datetime.combine(
-        expire + datetime.timedelta(days=1),
-        datetime.time.min
-    ) - now
+def package_from_role(role):
+    for k in ROLE_PACKAGES:
+        if role.name.startswith(k):
+            p = ROLE_PACKAGES[k]
+            return f"{k} | ราคา {p['price']} บาท | จำนวน {p['days']} วัน"
+    return role.name
 
-    embed = discord.Embed(
-        title="📅 Check Member Time",
-        color=discord.Color.green()
-    )
+# ================= EMBED =================
+def build_embed(member, data):
+    role = member.guild.get_role(data["role_id"])
+    start = datetime.date.fromisoformat(data["start_date"])
+    expire = datetime.date.fromisoformat(data["expire_date"])
 
-    embed.set_thumbnail(url=user.display_avatar.url)
+    start_dt = datetime.datetime.combine(start, datetime.time.min)
+    expire_dt = datetime.datetime.combine(expire, datetime.time.max)
 
-    embed.add_field(name="👤 สมาชิก", value=user.mention, inline=False)
+    embed = discord.Embed(title="👑 สถานะสมาชิก", color=discord.Color.gold())
+    embed.set_thumbnail(url=GIF_THUMBNAIL)
+
+    embed.add_field(name="👤 ผู้รับ Role", value=member.mention, inline=False)
+    embed.add_field(name="🎭 Role", value=role.mention, inline=False)
+    embed.add_field(name="📅 วันที่สมัคร", value=start.strftime("%d/%m/%Y"), inline=True)
+    embed.add_field(name="💎 แพ็กเกจ", value=package_from_role(role), inline=False)
+    embed.add_field(name="🗓 วันหมดอายุ", value=expire.strftime("%d/%m/%Y"), inline=True)
     embed.add_field(
-        name="🏷️ Member",
-        value=f"**{info['member_name']}** | {info['days']} วัน | {info['price']} บาท",
-        inline=False
-    )
-    embed.add_field(name="📌 วันที่ลงทะเบียน", value=start.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(name="⏳ วันหมดอายุ", value=expire.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(
-        name="🕒 เวลาที่เหลือ",
-        value=f"```{format_timedelta(remaining)}```",
+        name="⏳ เวลาที่เหลือ",
+        value=format_remaining(expire_dt - datetime.datetime.now()),
         inline=False
     )
     embed.add_field(
         name="📊 Progress",
-        value=f"{progress_bar(used)}  {int((used/TOTAL_DAYS)*100)}%",
+        value=progress(start_dt, expire_dt),
         inline=False
     )
-
-    embed.set_footer(text="👑 ADMINZENO • TIME MEMBER SYSTEM")
+    embed.set_footer(text="MEMBER SYSTEM • 30 DAYS")
     return embed
 
-# ================= Views =================
-class MemberControlView(discord.ui.View):
-    def __init__(self, member_id):
-        super().__init__(timeout=None)
-        self.member_id = str(member_id)
-
-    @discord.ui.button(label="✏️ แก้ไข", style=discord.ButtonStyle.primary)
-    async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != ADMIN_ID:
-            await interaction.response.send_message("❌ เฉพาะแอดมิน", ephemeral=True)
-            return
-        await interaction.response.send_message(
-            "📝 ใช้คำสั่ง `/setrole` ใหม่เพื่อแก้ไขข้อมูลสมาชิก",
-            ephemeral=True
-        )
-
-    @discord.ui.button(label="🗑️ ลบ", style=discord.ButtonStyle.danger)
-    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != ADMIN_ID:
-            await interaction.response.send_message("❌ เฉพาะแอดมิน", ephemeral=True)
-            return
-
-        data = load_data()
-        if self.member_id in data:
-            del data[self.member_id]
-            save_data(data)
-            await interaction.response.send_message("🗑️ ลบข้อมูลสมาชิกแล้ว", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ ไม่พบข้อมูล", ephemeral=True)
-
-# ================= Commands =================
-@bot.tree.command(name="setrole", description="เพิ่ม / แก้ไข สมาชิกแบบกำหนดวัน")
-@app_commands.describe(
-    member="ผู้รับ Role",
-    role="Role",
-    start_date="วันสมัคร (DD/MM/YY)",
-    member_name="ชื่อแพ็กเกจ",
-    price="ราคา",
-    days="จำนวนวัน"
-)
-async def setrole(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    role: discord.Role,
-    start_date: str,
-    member_name: str,
-    price: int,
-    days: int
-):
+# ================= COMMAND =================
+@bot.tree.command(name="setrole")
+async def setrole(interaction: discord.Interaction, member: discord.Member, role: discord.Role, start_date: str):
     if interaction.user.id != ADMIN_ID:
-        await interaction.response.send_message("❌ เฉพาะแอดมิน", ephemeral=True)
+        await interaction.response.send_message("❌ Admin only", ephemeral=True)
         return
 
-    try:
-        start = datetime.datetime.strptime(start_date, "%d/%m/%y").date()
-    except:
-        await interaction.response.send_message("❌ รูปแบบวันที่ผิด (DD/MM/YY)", ephemeral=True)
-        return
+    start = parse_date(start_date)
+    expire = expire_date(start)
 
-    expire = calc_expire(start)
     await member.add_roles(role)
 
     data = load_data()
-    data[str(member.id)] = {
+    payload = {
         "role_id": role.id,
-        "start": start.isoformat(),
-        "expire": expire.isoformat(),
-        "member_name": member_name,
-        "price": price,
-        "days": days,
+        "start_date": start.isoformat(),
+        "expire_date": expire.isoformat(),
         "warned": False
     }
+
+    msg = await interaction.response.send_message(
+        embed=build_embed(member, payload),
+        fetch_response=True
+    )
+
+    payload["channel_id"] = msg.channel.id
+    payload["message_id"] = msg.id
+
+    data[str(member.id)] = payload
     save_data(data)
 
-    embed = build_member_embed(member, data[str(member.id)])
+    try:
+        await member.send("👑 คุณได้รับ Role เรียบร้อย")
+        admin = await bot.fetch_user(ADMIN_ID)
+        await admin.send(f"✅ แอด Role ให้ {member}")
+    except:
+        pass
 
-    await interaction.response.send_message(
-        embed=embed,
-        view=MemberControlView(member.id),
-        ephemeral=True
-    )
-
-@bot.tree.command(name="check", description="ตรวจสอบสถานะสมาชิก")
-async def check(interaction: discord.Interaction):
-    data = load_data()
-    uid = str(interaction.user.id)
-
-    if uid not in data:
-        await interaction.response.send_message("❌ คุณยังไม่มีสถานะสมาชิก", ephemeral=True)
-        return
-
-    embed = build_member_embed(interaction.user, data[uid])
-
-    await interaction.response.send_message(
-        embed=embed,
-        view=MemberControlView(uid),
-        ephemeral=True
-    )
-
-# ================= Background Task =================
+# ================= AUTO TASK =================
 @tasks.loop(minutes=1)
-async def expire_checker():
+async def auto_refresh():
     data = load_data()
     now = datetime.datetime.now()
+    changed = False
 
     for uid, info in list(data.items()):
-        expire = datetime.date.fromisoformat(info["expire"])
-        remaining_days = (expire - now.date()).days
-
         user = bot.get_user(int(uid))
         if not user:
             continue
 
-        if remaining_days == 3 and not info.get("warned"):
+        expire = datetime.date.fromisoformat(info["expire_date"])
+        expire_dt = datetime.datetime.combine(expire, datetime.time.max)
+
+        # refresh embed
+        try:
+            ch = bot.get_channel(info["channel_id"])
+            msg = await ch.fetch_message(info["message_id"])
+            await msg.edit(embed=build_embed(user, info))
+        except:
+            pass
+
+        # warn 3 days
+        if not info["warned"] and (expire_dt - now).days == 3:
             try:
                 await user.send("⏰ สมาชิกของคุณจะหมดอายุในอีก 3 วัน")
-                info["warned"] = True
             except:
                 pass
+            info["warned"] = True
+            changed = True
 
-        if remaining_days < 0:
+        # expire → delete embed
+        if now > expire_dt:
+            try:
+                ch = bot.get_channel(info["channel_id"])
+                msg = await ch.fetch_message(info["message_id"])
+                await msg.delete()
+            except:
+                pass
             del data[uid]
+            changed = True
 
-    save_data(data)
+    if changed:
+        save_data(data)
 
-# ================= Events =================
+# ================= READY =================
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    expire_checker.start()
+    auto_refresh.start()
     print("👑 BOT ONLINE")
 
 bot.run(TOKEN)
