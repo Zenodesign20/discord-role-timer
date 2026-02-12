@@ -14,7 +14,7 @@ TOTAL_DAYS = 30
 
 GIF_THUMBNAIL = "https://cdn.discordapp.com/attachments/1468621028598087843/1471249375706746890/Black_White_Minimalist_Animation_Logo_Video_1.gif"
 
-# ผูกแพ็กกับ Role (ใช้เพื่อแสดงผลเท่านั้น ❌ไม่เอาไปคำนวณ)
+# แพ็กผูกกับ Role (ใช้เพื่อแสดงผลเท่านั้น)
 ROLE_PACKAGES = {
     "VIP": {"price": 200, "days": 30},
     "Gold": {"price": 100, "days": 30},
@@ -25,7 +25,7 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= UTILS =================
+# ================= DATA =================
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
@@ -36,14 +36,15 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def parse_date(date_str: str):
+# ================= TIME =================
+def parse_date(date_str):
     return datetime.datetime.strptime(date_str, "%d/%m/%y").date()
 
-def calc_expire(start_date: datetime.date):
-    # สมัคร = วันที่ 1 → +29 = ครบ 30 วัน
+def calc_expire(start_date):
+    # นับวันสมัครเป็นวันแรก → +29 = ครบ 30 วัน
     return start_date + datetime.timedelta(days=29)
 
-def format_remaining(td: datetime.timedelta):
+def format_remaining(td):
     if td.total_seconds() < 0:
         td = datetime.timedelta(seconds=0)
     sec = int(td.total_seconds())
@@ -100,9 +101,9 @@ def build_embed(member: discord.Member, info: dict):
     embed.set_footer(text="MEMBER SYSTEM • 30 DAYS")
     return embed
 
-# ================= VIEW (ADMIN ONLY) =================
+# ================= VIEW =================
 class AdminView(discord.ui.View):
-    def __init__(self, member_id: str):
+    def __init__(self, member_id):
         super().__init__(timeout=None)
         self.member_id = member_id
 
@@ -113,12 +114,23 @@ class AdminView(discord.ui.View):
             return
 
         data = load_data()
-        if self.member_id in data:
-            del data[self.member_id]
-            save_data(data)
-            await interaction.response.send_message("🗑️ ลบข้อมูลสมาชิกเรียบร้อย", ephemeral=True)
-        else:
+        info = data.get(self.member_id)
+        if not info:
             await interaction.response.send_message("❌ ไม่พบข้อมูล", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        member = guild.get_member(int(self.member_id))
+        role = guild.get_role(info["role_id"])
+
+        if member and role:
+            await member.remove_roles(role, reason="Admin removed member")
+
+        del data[self.member_id]
+        save_data(data)
+
+        await interaction.message.delete()
+        await interaction.response.send_message("🗑️ ลบสมาชิกเรียบร้อย", ephemeral=True)
 
 # ================= COMMAND =================
 @bot.tree.command(name="setrole", description="เพิ่มสมาชิกแบบกำหนดวันที่สมัคร (30 วัน)")
@@ -127,14 +139,9 @@ class AdminView(discord.ui.View):
     role="Role",
     start_date="วันที่สมัคร (DD/MM/YY)"
 )
-async def setrole(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    role: discord.Role,
-    start_date: str
-):
+async def setrole(interaction: discord.Interaction, member: discord.Member, role: discord.Role, start_date: str):
     if interaction.user.id != ADMIN_ID:
-        await interaction.response.send_message("❌ คำสั่งนี้สำหรับแอดมินเท่านั้น", ephemeral=True)
+        await interaction.response.send_message("❌ เฉพาะแอดมินเท่านั้น", ephemeral=True)
         return
 
     try:
@@ -144,10 +151,8 @@ async def setrole(
         return
 
     expire = calc_expire(start)
-
     await member.add_roles(role)
 
-    data = load_data()
     info = {
         "role_id": role.id,
         "start_date": start.isoformat(),
@@ -155,22 +160,20 @@ async def setrole(
         "warned": False
     }
 
-    # ส่ง Embed (ให้ทุกคนเห็น)
     await interaction.response.send_message(
         embed=build_embed(member, info),
         view=AdminView(str(member.id))
     )
 
-    # ดึง message ที่เพิ่งส่ง (FIX fetch_response error)
     msg = await interaction.original_response()
 
     info["channel_id"] = msg.channel.id
     info["message_id"] = msg.id
 
+    data = load_data()
     data[str(member.id)] = info
     save_data(data)
 
-    # DM แจ้ง
     try:
         await member.send("👑 คุณได้รับ Role สมาชิกเรียบร้อย")
         admin = await bot.fetch_user(ADMIN_ID)
@@ -186,36 +189,41 @@ async def auto_refresh():
     changed = False
 
     for uid, info in list(data.items()):
-        user = bot.get_user(int(uid))
-        if not user:
-            continue
+        guild = bot.guilds[0]
+        member = guild.get_member(int(uid))
+        role = guild.get_role(info["role_id"])
 
+        start = datetime.date.fromisoformat(info["start_date"])
         expire = datetime.date.fromisoformat(info["expire_date"])
         expire_dt = datetime.datetime.combine(expire, datetime.time.max)
 
-        # 🔄 Refresh Embed
+        # Refresh embed
         try:
             channel = bot.get_channel(info["channel_id"])
-            message = await channel.fetch_message(info["message_id"])
-            await message.edit(embed=build_embed(user, info))
+            msg = await channel.fetch_message(info["message_id"])
+            if member:
+                await msg.edit(embed=build_embed(member, info))
         except:
             pass
 
-        # ⏰ เตือนก่อนหมด 3 วัน
+        # Warn before 3 days
         if not info["warned"] and (expire_dt - now).days == 3:
             try:
-                await user.send("⏰ สมาชิกของคุณจะหมดอายุในอีก 3 วัน")
+                await member.send("⏰ สมาชิกของคุณจะหมดอายุในอีก 3 วัน")
             except:
                 pass
             info["warned"] = True
             changed = True
 
-        # ❌ หมดอายุ → ลบ Embed + ลบข้อมูล
+        # Expired
         if now > expire_dt:
             try:
+                if member and role:
+                    await member.remove_roles(role, reason="Membership expired")
                 channel = bot.get_channel(info["channel_id"])
-                message = await channel.fetch_message(info["message_id"])
-                await message.delete()
+                msg = await channel.fetch_message(info["message_id"])
+                await msg.delete()
+                await member.send("❌ สมาชิกของคุณหมดอายุแล้ว")
             except:
                 pass
             del data[uid]
