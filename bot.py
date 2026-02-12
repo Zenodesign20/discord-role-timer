@@ -28,6 +28,7 @@ def save_data(data):
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 def calc_expire(start_date: datetime.date):
+    # นับวันสมัครเป็นวันแรก → 30 วัน
     return start_date + datetime.timedelta(days=29)
 
 def progress_bar(used):
@@ -104,7 +105,6 @@ async def setrole(
         return
 
     expire = calc_expire(start)
-
     await member.add_roles(role)
 
     data = load_data()
@@ -139,22 +139,54 @@ async def check(interaction: discord.Interaction):
     now = datetime.datetime.now()
 
     used = (now.date() - start).days + 1
-    remaining = datetime.datetime.combine(expire + datetime.timedelta(days=1), datetime.time.min) - now
+    remaining = datetime.datetime.combine(
+        expire + datetime.timedelta(days=1),
+        datetime.time.min
+    ) - now
 
+    # -------- EMBED (FIXED DISPLAY) --------
     embed = discord.Embed(
-        title="👑 สถานะสมาชิก",
+        title="📅 Check Member Time",
         color=discord.Color.green()
     )
-    embed.add_field(name="👤 ผู้รับ Role", value=interaction.user.mention, inline=False)
-    embed.add_field(name="🏷️ Role", value=f"<@&{info['role_id']}>", inline=False)
-    embed.add_field(name="📅 วันที่สมัคร", value=start.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(name="💳 Member",
-        value=f"**{info['member_name']}** | ราคา {info['price']} บาท | จำนวน {info['days']} วัน",
+
+    embed.add_field(
+        name="👤 สมาชิก",
+        value=interaction.user.mention,
         inline=False
     )
-    embed.add_field(name="⏰ วันหมดอายุ", value=expire.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(name="⏳ เวลาที่เหลือ", value=format_timedelta(remaining), inline=False)
-    embed.add_field(name="📊 Progress", value=f"{progress_bar(used)} ({used}/{TOTAL_DAYS} วัน)", inline=False)
+
+    embed.add_field(
+        name="🏷️ Member",
+        value=f"**{info['member_name']}** | {info['days']} วัน | {info['price']} บาท",
+        inline=False
+    )
+
+    embed.add_field(
+        name="📌 วันที่ลงทะเบียน",
+        value=start.strftime("%d/%m/%Y"),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⏳ วันหมดอายุ",
+        value=expire.strftime("%d/%m/%Y"),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🕒 เวลาที่เหลือ",
+        value=f"```{format_timedelta(remaining)}```",
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Progress (30 วัน)",
+        value=f"{progress_bar(used)}  {int((used/TOTAL_DAYS)*100)}%",
+        inline=False
+    )
+
+    embed.set_footer(text="👑 ADMINZENO • TIME MEMBER SYSTEM")
 
     await interaction.response.send_message(
         embed=embed,
