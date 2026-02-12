@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 # ================= CONFIG =================
 TOKEN = os.getenv("DISCORD_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))  # ตั้งใน Environment แล้ว
+ADMIN_ID = 1392851942480412822
 DATA_FILE = "members.json"
 
 DURATION_DAYS = 30
