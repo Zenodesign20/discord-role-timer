@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 # ========= CONFIG =========
 TOKEN = os.getenv("DISCORD_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "1465623956814827604"))
 DATA_FILE = "members.json"
 ROLES_FILE = "roles.json"
 DURATION_DAYS = 30  # FIX 30 DAYS
