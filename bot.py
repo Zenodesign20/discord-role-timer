@@ -14,7 +14,6 @@ TOTAL_DAYS = 30
 
 GIF_THUMBNAIL = "https://cdn.discordapp.com/attachments/1468621028598087843/1471249375706746890/Black_White_Minimalist_Animation_Logo_Video_1.gif"
 
-# ใช้เพื่อแสดงผลเท่านั้น ❌ไม่เอาไปคำนวณ
 ROLE_PACKAGES = {
     "VIP": {"price": 200, "days": 30},
     "Gold": {"price": 100, "days": 30},
@@ -41,7 +40,6 @@ def parse_date(date_str: str) -> date:
     return datetime.strptime(date_str, "%d/%m/%y").date()
 
 def calc_expire(start_date: date) -> date:
-    # นับวันสมัครเป็นวันที่ 1 → +29 = ครบ 30 วัน
     return start_date + timedelta(days=29)
 
 def remaining_string(expire_dt: datetime) -> str:
@@ -66,7 +64,6 @@ def smooth_progress(start_dt: datetime, end_dt: datetime) -> str:
     bars = 20
     filled = int(ratio * bars)
 
-    # เปลี่ยนสีตามช่วงเวลา
     if ratio < 0.7:
         bar = "🟩"
     elif ratio < 0.9:
@@ -113,7 +110,7 @@ def build_embed(member: discord.Member, info: dict) -> discord.Embed:
     embed.set_footer(text="MEMBER SYSTEM • 30 DAYS")
     return embed
 
-# ================= VIEW (ADMIN ONLY) =================
+# ================= VIEW =================
 class AdminView(discord.ui.View):
     def __init__(self, member_id: str):
         super().__init__(timeout=None)
@@ -134,12 +131,9 @@ class AdminView(discord.ui.View):
 
 # ================= COMMAND =================
 @bot.tree.command(name="setrole", description="เพิ่มสมาชิก (30 วัน)")
-@app_commands.describe(
-    member="ผู้รับ Role",
-    role="Role",
-    start_date="วันที่สมัคร (DD/MM/YY)"
-)
+@app_commands.describe(member="ผู้รับ Role", role="Role", start_date="วันที่สมัคร (DD/MM/YY)")
 async def setrole(interaction: discord.Interaction, member: discord.Member, role: discord.Role, start_date: str):
+
     if interaction.user.id != ADMIN_ID:
         await interaction.response.send_message("❌ สำหรับแอดมินเท่านั้น", ephemeral=True)
         return
@@ -174,7 +168,6 @@ async def setrole(interaction: discord.Interaction, member: discord.Member, role
     data[str(member.id)] = info
     save_data(data)
 
-    # DM แจ้ง User + Admin
     try:
         await member.send("👑 คุณได้รับ Role สมาชิกเรียบร้อยแล้ว")
         admin = await bot.fetch_user(ADMIN_ID)
@@ -183,8 +176,12 @@ async def setrole(interaction: discord.Interaction, member: discord.Member, role
         pass
 
 # ================= AUTO TASK =================
-@tasks.loop(seconds=5)
+# 🔥 จุดที่ 1: เปลี่ยนเป็น 60 นาที กัน 429 100%
+@tasks.loop(minutes=60)
 async def check_expired_roles():
+
+    await bot.wait_until_ready()   # 🔥 จุดที่ 2: ทำให้ Railway เสถียร
+
     data = load_data()
     now = datetime.now(timezone.utc)
     changed = False
@@ -201,7 +198,6 @@ async def check_expired_roles():
         expire_date = date.fromisoformat(info["expire_date"])
         expire_dt = datetime.combine(expire_date, time.max, tzinfo=timezone.utc)
 
-        # ⛔ หมดอายุ
         if now >= expire_dt:
             try:
                 if member and role:
@@ -223,7 +219,7 @@ async def check_expired_roles():
             changed = True
             continue
 
-        # 🔄 Refresh Embed (เฉพาะที่ยังไม่หมด)
+        # 🔄 Refresh Embed (เหลือแค่ทุก 60 นาที)
         try:
             channel = bot.get_channel(info["channel_id"])
             msg = await channel.fetch_message(info["message_id"])
@@ -231,7 +227,6 @@ async def check_expired_roles():
         except:
             pass
 
-        # ⚠ แจ้งเตือนก่อนหมด 3 วัน
         if not info["warned"] and (expire_dt - now).days == 3:
             try:
                 await member.send("⏰ สมาชิกของคุณจะหมดอายุในอีก 3 วัน")
